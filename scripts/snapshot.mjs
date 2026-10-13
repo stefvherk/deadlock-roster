@@ -620,6 +620,20 @@ async function statDefinition(key) {
 }
 
 // ---- Heroes
+/**
+ * The gloat portrait the hero's own wiki page shows. Its file name is irregular — "Ivy_Gloat_.png",
+ * "Doorman_Gloat.png", "Rem_Gloat_(Familiar).png", "Silver_Gloat_Portrait.png", "Baba_gloat.png" —
+ * so ask the page instead of guessing. Prefer files named after the hero (Silver's page also shows
+ * her werewolf form's "Werewolf_Silver_Gloat.png").
+ */
+async function pageGloatFile(name) {
+  const j = await get(`${WIKI}/api.php?action=parse&page=${encodeURIComponent(name)}&prop=images&format=json&formatversion=2`).catch(() => null)
+  const norm = (s) => s.toLowerCase().replace(/[^a-z]/g, '')
+  const hero = norm(name.replace(/^The /, ''))
+  const gloats = (j?.parse?.images ?? []).filter((f) => /gloat/i.test(f))
+  return gloats.find((f) => norm(f).startsWith(hero)) ?? null
+}
+
 const fileNames = released.flatMap(({ name }) => {
   const n = name.replace(/ /g, '_')
   return [`${n}_Render.png`, `${n}_card.png`, `${n}_Gloat.png`, `${n}_name.svg`]
@@ -638,7 +652,11 @@ for (const { name, releaseDate } of released) {
   const images = {
     render: await art(`${n}_Render.png`, `heroes/${slug}/render.webp`, { width: 1600, quality: 80 }),
     card: await art(`${n}_card.png`, `heroes/${slug}/card.webp`, { width: 560 }),
-    gloat: await art(`${n}_Gloat.png`, `heroes/${slug}/gloat.webp`, { width: 560 }),
+    gloat: await (async () => {
+      const file = (await pageGloatFile(name)) ?? (available.has(`${n}_Gloat.png`) ? `${n}_Gloat.png` : null)
+      if (!file) return null
+      return saveFile(file, `heroes/${slug}/gloat.webp`, { width: 560 }).catch((e) => (console.warn(`\n    ${file}: ${e.message}`), null))
+    })(),
     name: await art(`${n}_name.svg`, `heroes/${slug}/name.svg`),
   }
 
