@@ -30,8 +30,16 @@ export function unlockTier(ability: Ability, key: string): Tier | null {
 
 export const round = (n: number) => String(Math.round(n * 100) / 100)
 
+/**
+ * The game uses 9999s to mean "no time limit" (e.g. the channel on Apollo's ultimate, Grey Talon's
+ * Charged Shot and Celeste's Shining Wonder, which you hold until you release). Never show it as a number.
+ */
+export const NO_LIMIT_SECONDS = 9999
+export const isNoLimit = (prop: Pick<AbilityProp, 'postfix'>, value: number) => prop.postfix.trim() === 's' && Math.abs(value) >= NO_LIMIT_SECONDS
+
 /** Formats a value the way the game does: "+15%", "−28%", "20m", "6s". */
 export function formatProp(prop: AbilityProp, value: number) {
+  if (isNoLimit(prop, value)) return 'No limit'
   let sign = ''
   if (prop.prefix.includes('{s:sign}')) sign = value > 0 ? '+' : value < 0 ? '−' : ''
   else if (prop.prefix.trim() === '-') sign = value > 0 ? '−' : ''

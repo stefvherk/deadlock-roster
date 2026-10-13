@@ -126,9 +126,9 @@ export function GlossaryTip() {
             <a href={entry.source} target="_blank" rel="noreferrer" tabIndex={-1}>
               Deadlock Wiki
             </a>
-          ) : (
+          ) : entry.source ? (
             <span className="glossary-tip__source">From the game&rsquo;s own text</span>
-          )}
+          ) : null}
         </>
       )}
     </div>
