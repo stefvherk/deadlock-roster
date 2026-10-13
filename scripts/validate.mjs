@@ -33,6 +33,8 @@ for (const h of roster.heroes) {
   const at = h.name
   for (const k of ['render', 'card', 'name']) if (!onDisk(h.images[k])) err(at, `missing ${k} image`)
   if (h.images.gloat && !onDisk(h.images.gloat)) err(at, 'gloat image path broken')
+  // Every released hero has gloat art on the wiki, even when the file name is irregular.
+  if (!h.images.gloat) warn(at, 'no gloat (hover) art found — the roster card will only zoom on hover')
   if (!/^#[0-9a-f]{6}$/i.test(h.accent)) err(at, `bad accent ${h.accent}`)
   if (h.tags.length !== 3) err(at, `expected 3 tags, got ${h.tags.length}`)
   if (!h.role) warn(at, 'no role text in game data')
