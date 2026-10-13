@@ -588,6 +588,17 @@ const STAT_DEFINITIONS = {
   DebuffResist: { page: 'Debuff Resist' },
   TechPower: { lang: 'CitadelHeroStats_SpiritPower_Desc' },
   PowerIncreases: { page: 'Boon', sentences: 2 },
+
+  // Ability header stats (shown on every ability card).
+  AbilityCooldown: { page: 'Ability Cooldown', sentences: 1 },
+  AbilityCharges: { page: 'Charges', sentences: 2 },
+  AbilityCooldownBetweenCharge: { text: 'For abilities with charges: the wait between using one charge and the next. Restoring a used charge takes the regular cooldown.', page: 'Abilities' },
+  AbilityChannelTime: { text: 'How long the ability is channeled — held while a bar drains on your HUD. You can stop the channel early; the ability goes on cooldown from the first press.', page: 'Abilities' },
+  // No wiki page explains cast delay, so this is a plain description and shows no source link.
+  AbilityCastDelay: { text: 'The short wind-up between pressing the ability and it taking effect.', noSource: true },
+  AbilityCastRange: { text: 'How far away the ability can be aimed or placed. Ability Range items increase it.', page: 'Ability Range' },
+  AbilityDuration: { page: 'Ability Duration', sentences: 1 },
+  Radius: { text: 'The size of the area the ability affects. Ability Range items increase it.', page: 'Ability Range' },
 }
 /** Capitalised and ending in a full stop. */
 const sentenceCase = (s) => s.trim().replace(/^./, (c) => c.toUpperCase()).replace(/([^.!?])$/, '$1.')
@@ -595,7 +606,7 @@ const firstSentences =(text, n = 2) => (text.match(/[^.!?]+[.!?]+(\s|$)/g) ?? [t
 async function statDefinition(key) {
   const d = STAT_DEFINITIONS[key]
   if (!d) return null
-  const source = d.page ? `${WIKI}/${pagePath(d.page)}${d.section ? '#' + pagePath(d.section) : ''}` : `${WIKI}/Data:Lang_en.json`
+  const source = d.noSource ? '' : d.page ? `${WIKI}/${pagePath(d.page)}${d.section ? '#' + pagePath(d.section) : ''}` : `${WIKI}/Data:Lang_en.json`
   if (d.text) return { text: sentenceCase(d.text), source }
   if (d.lang) {
     // Game strings look like "<b>Ammo</b> - The number of shots…": keep the explanation.
@@ -672,6 +683,8 @@ heroes.sort((a, b) => a.name.localeCompare(b.name))
 
 // Every stat the Stats section shows gets a definition.
 const statKeys = new Set(heroes.flatMap((h) => [...h.statGroups.flatMap((g) => g.stats), ...h.levelScaling, ...h.spiritScaling].map((s) => s.key)))
+// Plus the shared ability stats (cooldown, cast delay, channel duration, …) that appear on ability cards.
+for (const h of heroes) for (const a of h.abilities) for (const k of Object.keys(a.props)) if (STAT_DEFINITIONS[k]?.page || STAT_DEFINITIONS[k]?.text) statKeys.add(k)
 const statDefinitions = {}
 for (const key of statKeys) {
   const def = await statDefinition(key)

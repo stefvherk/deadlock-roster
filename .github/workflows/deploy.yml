@@ -3,6 +3,8 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  # Pull requests get the same build + data check, without deploying.
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -11,7 +13,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  # One deploy at a time; pull-request checks run in their own group so they never cancel a deploy.
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.ref) || 'pages' }}
   cancel-in-progress: true
 
 jobs:
@@ -38,10 +41,12 @@ jobs:
         run: npm run validate
 
       - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
         with:
           path: dist
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     environment:

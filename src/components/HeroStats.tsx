@@ -1,21 +1,13 @@
 import { useRef } from 'react'
 import type { Hero } from '../data/types'
 import { gsap, prefersReducedMotion, useGSAP } from '../lib/gsap'
+import { StatTerm } from './StatTerm'
 
 const fmt = (v: number) => {
   const n = Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 100) / 100
   return String(n)
 }
 const signed = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${fmt(Math.abs(v))}`
-
-/** A stat name that shows its definition on hover, focus or tap (see GlossaryTip). */
-function StatTerm({ statKey, label }: { statKey: string; label: string }) {
-  return (
-    <span className="term" data-term={`stat:${statKey}`} data-term-title={label} tabIndex={0}>
-      {label}
-    </span>
-  )
-}
 
 /**
  * Every stat the game gives this hero, grouped like the in-game hero sheet.

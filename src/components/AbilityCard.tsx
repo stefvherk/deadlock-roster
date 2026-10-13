@@ -1,6 +1,7 @@
 import { useId, useMemo, useState } from 'react'
 import type { Ability, AbilityBlock, AbilityProp, Tier } from '../data/types'
 import { describeChanges, formatProp, round, unlockTier, valuesAtTier, type PropValue } from '../lib/abilityMath'
+import { StatTerm } from './StatTerm'
 
 const TIER_NAMES = ['Base', 'I', 'II', 'III'] as const
 const TIER_COSTS = [1, 2, 5] as const
@@ -29,7 +30,9 @@ function PropRow({ prop, now, base, lockedUntil }: { prop: AbilityProp; now: Pro
   return (
     <li className={`prop${changed ? ' is-changed' : ''}${lockedUntil ? ' is-locked' : ''}`}>
       {prop.icon ? <img className="prop__icon" src={prop.icon} alt="" loading="lazy" /> : <i className="prop__icon prop__icon--dot" />}
-      <span className="prop__label">{prop.label}</span>
+      <span className="prop__label">
+        <StatTerm statKey={prop.key} label={prop.label} />
+      </span>
       {lockedUntil ? (
         <span className="prop__lock">Unlocks at {TIER_NAMES[lockedUntil]}</span>
       ) : (
@@ -102,7 +105,9 @@ export function AbilityCard({ ability, tier, onTier }: { ability: Ability; tier:
               <li key={k} className={v !== base[k]?.value ? 'is-changed' : ''}>
                 {prop.icon && <img src={prop.icon} alt="" loading="lazy" />}
                 <b key={text}>{text}</b>
-                <span>{prop.label}</span>
+                <span>
+                  <StatTerm statKey={k} label={prop.label} />
+                </span>
               </li>
             )
           })}
