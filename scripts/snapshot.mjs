@@ -256,6 +256,28 @@ function attrSpan(name) {
   const style = a?.color ? ` style="--attr:${a.color}"` : ''
   return `<span class="inline-attr" data-attr="${name}"${style}>${img}${label ? `<span class="inline-attr__label">${label}</span>` : ''}</span>`
 }
+/**
+ * Game text that is unusable as shipped: Valve left an unfinished string ("IGNORED[]% Max Health
+ * Damage" on Apollo's ultimate), or a value placeholder we couldn't fill. Callers fall back to text
+ * built from the real stat data instead of showing it.
+ */
+const BROKEN_GAME_TEXT = /IGNORED|\[\s*\]|\{[a-z]:[^}]*\}/i
+const fmtValue = (v) => `${v < 0 ? '−' : ''}${Math.round(Math.abs(v) * 100) / 100}`
+
+/** Fills {s:Name} value placeholders from `values` ({s:sign} becomes the sign of the value that follows). */
+function fillPlaceholders(html, values) {
+  return html
+    .replace(/\{s:sign\}\{s:([A-Za-z0-9_]+)\}/g, (m, k) => (k in values ? `${values[k] < 0 ? '−' : '+'}${fmtValue(Math.abs(values[k]))}` : m))
+    .replace(/\{s:([A-Za-z0-9_]+)\}/g, (m, k) => (k !== 'sign' && k in values ? fmtValue(values[k]) : m))
+}
+
+/** Renders game text; returns null when the text is broken and shouldn't be shown (see BROKEN_GAME_TEXT). */
+function renderGameTextOrNull(html, values = {}) {
+  const filled = fillPlaceholders(html ?? '', values)
+  if (BROKEN_GAME_TEXT.test(filled.replace(/\{g:[^}]*\}/g, ''))) return null
+  return renderGameText(filled)
+}
+
 function renderGameText(html = '') {
   return html
     .replace(/"n/g, '<br>')
@@ -274,6 +296,8 @@ function renderGameText(html = '') {
 }
 
 // ---- Ability cards.
+/** Game-text problems found while building cards; printed at the end so they get noticed. */
+const gameTextIssues = []
 const SCALE_STATS = { spirit: 'spirit', weapon_power: 'weapon', weapon_damage_increase: 'weapon', melee: 'melee', heavy_melee: 'melee' }
 const num = (v) => (typeof v === 'number' ? v : v && typeof v === 'object' ? Number(v.Value) || 0 : Number(v) || 0)
 const ABILITY_GROUPS = [
@@ -311,7 +335,14 @@ function toAbility(card, slot) {
     }
     const alt = (info.Alt ?? []).map((p) => ((props[p.Key] ??= toProp(p)), p.Key))
     if (alt.length) blocks.push({ title: '', props: alt })
-    sections.push({ html: renderGameText(t(descKey) ?? ''), blocks, requires: info.RequiresUpgradeIndex ?? null })
+    const baseValues = Object.fromEntries(Object.values(props).map((p) => [p.key, p.base]))
+    let html = renderGameTextOrNull(t(descKey) ?? '', baseValues)
+    if (html === null) {
+      // Keep the description but drop the unfillable bits; the validator flags anything left over.
+      gameTextIssues.push(`${card.Name}: description has unfillable placeholders`)
+      html = renderGameText(fillPlaceholders(t(descKey) ?? '', baseValues))
+    }
+    sections.push({ html, blocks, requires: info.RequiresUpgradeIndex ?? null })
   }
   const header = Object.entries(card.Headers ?? {}).map(([k, p]) => ((props[k] ??= toProp(p, k)), k))
 
@@ -324,18 +355,24 @@ function toAbility(card, slot) {
     return keys.length ? [{ title, props: keys }] : []
   })
 
-  const upgrades = (card.Upgrades ?? []).slice(0, 3).map((u, i) => ({
-    cost: [1, 2, 5][i],
-    html: u.DescKey ? renderGameText(t(u.DescKey) ?? '') : '',
-    changes: Object.entries(u)
+  const upgrades = (card.Upgrades ?? []).slice(0, 3).map((u, i) => {
+    const changes = Object.entries(u)
       .filter(([k]) => k !== 'DescKey')
       .map(([key, v]) => {
         props[key] ??= { ...toProp({ Key: key, Value: 0 }), hidden: true }
         return v && typeof v === 'object'
           ? { key, value: Number(v.Value) || 0, scale: Number(v.Scale?.Value) || 0 }
           : { key, value: Number(v) || 0, scale: 0 }
-      }),
-  }))
+      })
+    // Placeholders in an upgrade's text refer to that upgrade's own changes ("{s:AbilityCooldown}s Cooldown").
+    let html = u.DescKey ? renderGameTextOrNull(t(u.DescKey), Object.fromEntries(changes.map((c) => [c.key, c.value]))) : ''
+    if (html === null) {
+      // Broken game text: show nothing rather than garbage; the site describes the stat changes instead.
+      gameTextIssues.push(`${card.Name} tier ${i + 1}: unusable game text ${JSON.stringify(t(u.DescKey))} — showing its stat changes instead`)
+      html = ''
+    }
+    return { cost: [1, 2, 5][i], html, changes }
+  })
 
   return {
     slot,
@@ -648,4 +685,5 @@ await writeFile(
 )
 for (const old of ['data/heroes.json', 'data/abilities.json', 'renders']) await rm(out(old), { recursive: true, force: true })
 
+if (gameTextIssues.length) console.warn(`\n${gameTextIssues.length} game-text issue(s) handled:\n  ${gameTextIssues.join('\n  ')}`)
 console.log(`\nSaved ${heroes.length} heroes (${heroes.reduce((n, h) => n + h.abilities.length, 0)} abilities), ${Object.keys(glossary).length} glossary terms, patch ${patch}.`)

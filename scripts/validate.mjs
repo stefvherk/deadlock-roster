@@ -17,8 +17,9 @@ const onDisk = (p) => {
   return existsSync(file) && readdirSync(dirname(file)).includes(basename(file))
 }
 
-// Leftovers that mean game text wasn't fully rendered.
-const RAW = /\{g:|\{s:|#ability_|\[\[|\{\{|<\/?Panel|undefined|NaN|\[object/
+// Leftovers that mean game text wasn't fully rendered — or was broken as shipped by the game
+// (e.g. "IGNORED[]% Max Health Damage", an unfinished string on Apollo's ultimate).
+const RAW = /\{g:|\{s:|\{[a-z]:|#ability_|\[\[|\{\{|<\/?Panel|undefined|NaN|\[object|IGNORED|\[\s*\]/
 const textOf = (html) => html.replace(/<[^>]+>/g, '').trim()
 
 if (roster.heroes.length < 40) err('roster', `only ${roster.heroes.length} heroes`)
@@ -78,6 +79,9 @@ for (const h of roster.heroes) {
     }
     for (const k of [...a.header, ...a.extras.flatMap((e) => e.props)]) if (!a.props[k]) err(aw, `unknown prop ${k}`)
     for (const p of Object.values(a.props)) {
+      // 9999s is the game's "no limit" marker and the site shows it as such; flag other huge values
+      // so a new sentinel never slips onto the page as a fake number.
+      if (Math.abs(p.base) >= 9999 && p.postfix.trim() !== 's') warn(aw, `${p.key} = ${p.base}${p.postfix} looks like a sentinel value`)
       if (!p.label) err(aw, `prop ${p.key} has no label`)
       if (!Number.isFinite(p.base)) err(aw, `prop ${p.key} base not a number`)
       if (!p.hidden && p.icon && !onDisk(p.icon)) err(aw, `prop icon missing: ${p.icon}`)
