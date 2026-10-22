@@ -21,13 +21,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 /* ------------------------------------------------------------------ fetching */
 
+// The wiki is busy right after a patch (503s, rate limits): back off and retry rather than fail the run.
 async function get(url, as = 'json') {
   for (let attempt = 1; ; attempt++) {
-    const res = await fetch(url, { headers: UA })
+    const res = await fetch(url, { headers: UA }).catch((e) => ({ ok: false, status: e.code ?? 'network error', headers: new Headers() }))
     if (res.ok) return as === 'json' ? res.json() : as === 'text' ? res.text() : Buffer.from(await res.arrayBuffer())
-    if (attempt >= 3 || res.status === 404) throw new Error(`${url} → HTTP ${res.status}`)
-    await sleep(800 * attempt)
+    const transient = res.status === 429 || res.status >= 500 || typeof res.status === 'string'
+    if (attempt >= 6 || !transient) throw new Error(`${url} → HTTP ${res.status}`)
+    const retryAfter = Number(res.headers.get('retry-after')) * 1000
+    await sleep(retryAfter || Math.min(1000 * 2 ** attempt, 30000))
   }
+}
+/** For .catch(): a page or file that doesn't exist yields `fallback`; any other failure stops the run. */
+const missingAs = (fallback) => (e) => {
+  if (/→ HTTP 404$/.test(e.message)) return fallback
+  throw e
 }
 const pagePath = (title) => encodeURIComponent(title.replace(/ /g, '_')).replace(/%2F/g, '/').replace(/%3A/g, ':')
 const rawCache = new Map()
@@ -51,6 +59,18 @@ async function existingFiles(names) {
   return found
 }
 
+/**
+ * The wiki's CDN can keep serving a 404 it cached before a new file finished uploading (Nurse Harrow's card,
+ * the day after her release). Retry like MediaWiki's own links do: the file URL with its upload time as query.
+ */
+async function freshFile(name, error) {
+  if (!/→ HTTP 404$/.test(error.message)) throw error
+  const j = await get(`${WIKI}/api.php?action=query&prop=imageinfo&iiprop=url|timestamp&format=json&formatversion=2&titles=${encodeURIComponent(`File:${name}`)}`)
+  const info = j.query.pages[0]?.imageinfo?.[0]
+  if (!info) throw error
+  return get(`${info.url}?${info.timestamp.replace(/\D/g, '')}`, 'buffer')
+}
+
 /* ------------------------------------------------------------------ assets */
 
 /** Downloads a wiki file to public/<rel>; raster images are converted to WebP. Returns the site path. */
@@ -58,7 +78,7 @@ async function saveFile(wikiName, rel, { width, quality = 82 } = {}) {
   const file = out(rel)
   if (!existsSync(file) || FORCE) {
     await mkdir(fileURLToPath(new URL('.', new URL(rel, PUBLIC))), { recursive: true })
-    const buf = await get(fileUrl(wikiName), 'buffer')
+    const buf = await get(fileUrl(wikiName), 'buffer').catch((e) => freshFile(wikiName, e))
     if (rel.endsWith('.svg')) await writeFile(file, buf)
     else {
       let img = sharp(buf)
@@ -196,7 +216,7 @@ const latest = await wikiJson('Data:LatestUpdate.json')
 const statOrder = await wikiJson('Data:StatInfoboxOrder.json')
 const attributeData = await wikiJson('Data:AttributeData.json')
 const dictionary = await wikiJson('Data:Dictionary')
-const releaseText = await wikiRaw('Heroes by release')
+const heroReleases = await wikiJson('Data:HeroReleases.json')
 const langModule = await wikiRaw('Module:Lang')
 const iconAttrModule = await wikiRaw('Module:Icon/attr')
 const statusPage = await wikiRaw('Status Effects')
@@ -209,13 +229,12 @@ const keyOverrides = Object.fromEntries(
 )
 const t = (key) => (key ? lang[keyOverrides[key] ?? key] ?? lang[key] : undefined)
 
-// ---- Released roster: the wiki's release table (rows with a release date).
-const released = releaseText
-  .split(/\n\|-\n/)
-  .slice(1)
-  .map((r) => r.split('\n').map((l) => l.replace(/^\|/, '').trim()))
-  .filter((r) => /^\d{4}-\d\d-\d\d$/.test(r[2] ?? ''))
-  .map((r) => ({ name: r[1].match(/HeroIcon\|([^}]+)/)?.[1], releaseDate: r[2] }))
+// ---- Released roster: the data behind the wiki's release table (heroes with a release date).
+const released = heroReleases.heroes
+  .filter((h) => /^\d{4}-\d\d-\d\d$/.test(h.date ?? ''))
+  .map((h) => ({ name: h.hero, releaseDate: h.date }))
+// An empty list means the source changed shape: stop before roster.json is overwritten with nothing.
+if (!released.length) throw new Error('No released heroes in Data:HeroReleases.json')
 const heroKeyByName = new Map(Object.entries(heroData).map(([k, h]) => [h.Name, k]))
 for (const r of released) if (!heroKeyByName.has(r.name) || !abilityCards[heroKeyByName.get(r.name)]) throw new Error(`No game data for released hero "${r.name}"`)
 console.log(`  ${released.length} released heroes, data for patch ${patch}`)
@@ -516,12 +535,12 @@ function firstParagraph(wikitext) {
   return wikiToText(lines.join(' '))
 }
 async function pageLead(title, hops = 0) {
-  const text = await wikiRaw(title).catch(() => '')
+  const text = await wikiRaw(title).catch(missingAs(''))
   // Follow "#REDIRECT [[Page#Section]]" to the section it points at.
   const redirect = text.match(/^#REDIRECT\s*\[\[([^\]#|]+)(?:#([^\]|]+))?/i)
   if (redirect && hops < 2) {
     if (redirect[2]) {
-      const target = await wikiRaw(redirect[1]).catch(() => '')
+      const target = await wikiRaw(redirect[1]).catch(missingAs(''))
       const section = sectionText(target, redirect[2])
       if (section) return section
     }
@@ -613,7 +632,7 @@ async function statDefinition(key) {
     const raw = decode(stripTags(t(d.lang) ?? '')).replace(/^[^-–]{1,40}\s[-–]\s/, '').trim()
     return raw ? { text: sentenceCase(raw), source: 'Deadlock game text' } : null
   }
-  const page = await wikiRaw(d.page).catch(() => '')
+  const page = await wikiRaw(d.page).catch(missingAs(''))
   let text = d.section ? sectionText(page, d.section) : ''
   if (!text && (!d.section || d.fallbackLead)) text = firstParagraph(page)
   return text ? { text: sentenceCase(firstSentences(text, d.sentences ?? 2)), source } : null
@@ -624,14 +643,16 @@ async function statDefinition(key) {
  * The gloat portrait the hero's own wiki page shows. Its file name is irregular — "Ivy_Gloat_.png",
  * "Doorman_Gloat.png", "Rem_Gloat_(Familiar).png", "Silver_Gloat_Portrait.png", "Baba_gloat.png" —
  * so ask the page instead of guessing. Prefer files named after the hero (Silver's page also shows
- * her werewolf form's "Werewolf_Silver_Gloat.png").
+ * her werewolf form's "Werewolf_Silver_Gloat.png"), then after the game's internal name (Nurse Harrow's
+ * is "Nurse_card_gloat_psd.png", from hero_nurse).
  */
-async function pageGloatFile(name) {
-  const j = await get(`${WIKI}/api.php?action=parse&page=${encodeURIComponent(name)}&prop=images&format=json&formatversion=2`).catch(() => null)
+async function pageGloatFile(name, key) {
+  const j = await get(`${WIKI}/api.php?action=parse&page=${encodeURIComponent(name)}&prop=images&format=json&formatversion=2`).catch(missingAs(null))
   const norm = (s) => s.toLowerCase().replace(/[^a-z]/g, '')
   const hero = norm(name.replace(/^The /, ''))
+  const internal = norm(key.replace(/^hero_/, ''))
   const gloats = (j?.parse?.images ?? []).filter((f) => /gloat/i.test(f))
-  return gloats.find((f) => norm(f).startsWith(hero)) ?? null
+  return gloats.find((f) => norm(f).startsWith(hero)) ?? gloats.find((f) => norm(f).startsWith(internal)) ?? null
 }
 
 const fileNames = released.flatMap(({ name }) => {
@@ -653,7 +674,7 @@ for (const { name, releaseDate } of released) {
     render: await art(`${n}_Render.png`, `heroes/${slug}/render.webp`, { width: 1600, quality: 80 }),
     card: await art(`${n}_card.png`, `heroes/${slug}/card.webp`, { width: 560 }),
     gloat: await (async () => {
-      const file = (await pageGloatFile(name)) ?? (available.has(`${n}_Gloat.png`) ? `${n}_Gloat.png` : null)
+      const file = (await pageGloatFile(name, key)) ?? (available.has(`${n}_Gloat.png`) ? `${n}_Gloat.png` : null)
       if (!file) return null
       return saveFile(file, `heroes/${slug}/gloat.webp`, { width: 560 }).catch((e) => (console.warn(`\n    ${file}: ${e.message}`), null))
     })(),
@@ -664,12 +685,12 @@ for (const { name, releaseDate } of released) {
   const japanese = hasCJK(loreHtml)
   let loreTranslation = null
   if (japanese) {
-    const tr = lorePageParagraphs(await wikiRaw(`${name}/Lore`).catch(() => ''))
+    const tr = lorePageParagraphs(await wikiRaw(`${name}/Lore`).catch(missingAs('')))
     if (tr.length) loreTranslation = { paragraphs: tr, source: `${WIKI}/${pagePath(`${name}/Lore`)}` }
   }
 
   const abilities = ['1', '2', '3', '4'].map((s) => abilityCards[key][s]).filter(Boolean).map((c, i) => toAbility(c, i + 1))
-  for (const a of abilities) a.icon = await saveFile(`${a.name.replace(/ /g, '_')}.png`, `abilities/${a.key}.webp`, { width: 128 }).catch(() => null)
+  for (const a of abilities) a.icon = await saveFile(`${a.name.replace(/ /g, '_')}.png`, `abilities/${a.key}.webp`, { width: 128 }).catch(missingAs(null))
 
   heroes.push({
     key,
