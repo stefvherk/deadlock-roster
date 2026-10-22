@@ -19,7 +19,7 @@ npm run validate   # check roster.json for missing data, images or unrendered ga
 Everything comes from the [Deadlock Wiki](https://deadlock.wiki) (CC BY-NC-SA 4.0), which extracts it from the game files every patch:
 
 - **Heroes, stats, abilities, upgrades:** `Data:HeroData.json`, `Data:AbilityCards.json`, `Data:Lang en.json` (the game's English text), `Data:StatInfoboxOrder.json`, `Data:AttributeData.json`.
-- **Which heroes are released:** the wiki's *Heroes by release* table.
+- **Which heroes are released:** `Data:HeroReleases.json`, the data behind the wiki's *Heroes by release* table.
 - **Icons and how game text is rendered:** mirrors the wiki's `Module:Lang` and `Module:Icon/attr`.
 - **Glossary tooltips:** the wiki's *Status Effects* page and damage-type pages.
 - **Art:** hero renders, cards, name logos and ability icons from the wiki's files, converted to WebP.

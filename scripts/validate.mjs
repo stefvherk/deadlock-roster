@@ -28,6 +28,8 @@ if (!roster.patch) err('roster', 'no patch date')
 for (const [id, g] of Object.entries(roster.glossary)) {
   if (!g.definition || /^#REDIRECT/i.test(g.definition) || g.definition.length < 25) err(`glossary ${id}`, `bad definition "${g.definition}"`)
 }
+// Every term that game text links to must have an entry, or its hover tip silently disappears.
+for (const id of new Set(Object.values(roster.attrTerms ?? {}))) if (!roster.glossary[id]) err(`glossary ${id}`, 'missing entry')
 
 for (const h of roster.heroes) {
   const at = h.name
